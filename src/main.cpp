@@ -32,6 +32,9 @@ int servoPosition = 0;
 // Timer setup
 auto timer = timer_create_default(); // create a timer with default settings
 
+/*
+** Shows the state of affairs to the serial interface.
+*/
 bool printSerialSetting(void *)
 {
   Serial.println("ACNH A button clicker, the debug interface.");
@@ -62,6 +65,11 @@ bool printSerialSetting(void *)
   return (true);
 }
 
+/*
+** Shows the state of things to the LCD display.
+** Top line is the setting (and buttons to adjust)
+** Second line is the value.
+*/
 bool printLCDSettings(void *)
 {
   lcd.clear();
@@ -100,6 +108,10 @@ bool printLCDSettings(void *)
   return (true);
 }
 
+/*
+** Actually press the button.
+** TODO: Make this non-blockig.
+*/
 void doPulse()
 {
   for (int i = 0; i <= iDeflection; i++)
@@ -115,6 +127,9 @@ void doPulse()
   }
 }
 
+/*
+** Setup activities..
+*/
 void setup()
 {
   //set up the LCD's number of columns and rows:
@@ -137,52 +152,61 @@ void setup()
   timer.every(2500, printLCDSettings);
 }
 
-void parseInput(char c) {
-  switch(c) {
-    case '1':
-      iDeflection++;
-      displayCycle = 0;
-      break;
-    case '4':
-      iDeflection--;
-      displayCycle = 0;
-      break;
-    case '2':
-      iSpeed++;
-      displayCycle = 1;
-      break;
-    case '5':
-      iSpeed--;
-      displayCycle = 1;
-      break;
-    case '3':
-      iDelay+=10;
-      displayCycle = 2;
-      break;
-    case '6':
-      iDelay-=10;
-      displayCycle = 3;
-      break;
+/*
+** Handles keypresses from the keypad. Called from loop().
+*/
+void parseInput(char c)
+{
+  switch (c)
+  {
+  case '1':
+    iDeflection++;
+    displayCycle = 0;
+    break;
+  case '4':
+    iDeflection--;
+    displayCycle = 0;
+    break;
+  case '2':
+    iSpeed++;
+    displayCycle = 1;
+    break;
+  case '5':
+    iSpeed--;
+    displayCycle = 1;
+    break;
+  case '3':
+    iDelay += 10;
+    displayCycle = 2;
+    break;
+  case '6':
+    iDelay -= 10;
+    displayCycle = 3;
+    break;
   }
 
-  iDeflection = constrain(iDeflection,0,180);
+  // Make sure the values we've set are within sane limtes.
+  iDeflection = constrain(iDeflection, 0, 180);
   iSpeed = constrain(iSpeed, 1, 1000);
   iDelay = constrain(iDelay, 10, 10000);
 
+  // Update the LCD now. This is cheesed a bit by setting the displaycycle in the switch statement above. Sometimes this is a bit weird if the timer event triggers immediately after pressing a number on the keypad.
   printLCDSettings(0);
 }
 
 void loop()
 {
+  // Tick the timer.
   timer.tick();
 
+  // Do keypad stuff.
   char customKey = customKeypad.getKey();
 
-  if (customKey){
+  if (customKey)
+  {
     Serial.print("Console received: ");
     Serial.println(customKey);
     parseInput(customKey);
-
   }
 }
 
