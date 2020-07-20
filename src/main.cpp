@@ -4,16 +4,22 @@
 #include <Servo.h>
 #include <arduino-timer.h>
 
+const int LCD_TIMER=2500;
+/*
+TODO:
+- Test buttons
+- Non-blocking "pulse" function
+*/
+
 // Various variables.
 int iDeflection = 48;
 int iDelay = 500;
-int iSpeed = 5;
+int iHoldDelay = 500;
 bool bRunning = false;
 
 // LCD setup
-const int rs = 13, en = 12, d4 = 11, d5 = 10, d6 = 9, d7 = 8;
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-int displayCycle = 0;
+LiquidCrystal lcd(13, 12, 11, 10, 9, 8);
+int iDisplayCycle = 0;
 
 // Keypad setup.
 const byte KEYPAD_ROWS = 2;
@@ -31,6 +37,8 @@ int servoPosition = 0;
 
 // Timer setup
 auto timer = timer_create_default(); // create a timer with default settings
+uintptr_t timerClickTask = 0;
+uintptr_t lcdTimerTask = 0;
 
 /*
 ** Shows the state of affairs to the serial interface.
@@ -54,11 +62,11 @@ bool printSerialSetting(void *)
   Serial.print("Delay (2/5): ");
   Serial.println(iDelay);
 
-  Serial.print("Speed (3/6): ");
-  Serial.println(iSpeed);
+  Serial.print("HoldDelay (3/6):");
+  Serial.println(iHoldDelay);
 
-  Serial.print("Total cycle time (2 x (Speed * Deflection)) + Delay): ");
-  Serial.println((iSpeed * iDeflection) + 15 + (iSpeed * iDeflection) + iDelay);
+  Serial.print("Total cycle time iHoldDelay + Delay): ");
+  Serial.println(iHoldDelay + iDelay);
 
   Serial.println();
 
@@ -73,7 +81,7 @@ bool printSerialSetting(void *)
 bool printLCDSettings(void *)
 {
   lcd.clear();
-  switch (displayCycle % 4)
+  switch (iDisplayCycle % 5)
   {
   case 0:
     lcd.setCursor(0, 0);
@@ -84,9 +92,9 @@ bool printLCDSettings(void *)
 
   case 1:
     lcd.setCursor(0, 0);
-    lcd.print("Push Speed (2,5)");
+    lcd.print("Hold Delay (2,5)");
     lcd.setCursor(0, 1);
-    lcd.print(iSpeed);
+    lcd.print(iHoldDelay);
     break;
 
   case 2:
@@ -100,31 +108,33 @@ bool printLCDSettings(void *)
     lcd.setCursor(0, 0);
     lcd.print("Total Cycle:    ");
     lcd.setCursor(0, 1);
-    lcd.print((iSpeed * iDeflection) + 15 + (iSpeed * iDeflection) + iDelay);
+    lcd.print(iHoldDelay + iDelay);
     break;
+
+  default:
+    lcd.setCursor(0, 0);
+    lcd.print("A start/stop.");
+    if (!bRunning)
+    {
+      lcd.setCursor(0, 1);
+      lcd.print("B to test");
+    }
   }
-  displayCycle++;
+  iDisplayCycle++;
 
   return (true);
 }
 
 /*
 ** Actually press the button.
-** TODO: Make this non-blockig.
 */
-void doPulse()
+bool doPulse(void *)
 {
-  for (int i = 0; i <= iDeflection; i++)
-  {
-    mainServo.write(i);
-    delay(iSpeed);
-  }
-  delay(15);
-  for (int i = iDeflection; i > servoPosition; i--)
-  {
-    mainServo.write(i);
-    delay(iSpeed);
-  }
+  mainServo.write(iDeflection);
+  delay(iHoldDelay);
+  mainServo.write(servoPosition);
+
+  return (true);
 }
 
 /*
@@ -146,10 +156,10 @@ void setup()
   lcd.setCursor(0, 0);
   lcd.print("ACNH AutoClicker");
 
-  displayCycle = 0;
+  iDisplayCycle = 0;
 
   timer.every(10000, printSerialSetting);
-  timer.every(2500, printLCDSettings);
+  lcdTimerTask = timer.every(LCD_TIMER, printLCDSettings);
 }
 
 /*
@@ -157,41 +167,72 @@ void setup()
 */
 void parseInput(char c)
 {
+  if (!bRunning)
+  {
+    switch (c)
+    {
+    case '1':
+      iDeflection++;
+      iDisplayCycle = 0;
+      break;
+    case '4':
+      iDeflection--;
+      iDisplayCycle = 0;
+      break;
+    case '2':
+      iHoldDelay += 50;
+      iDisplayCycle = 1;
+      break;
+    case '5':
+      iHoldDelay -= 50;
+      iDisplayCycle = 1;
+      break;
+    case '3':
+      iDelay += 50;
+      iDisplayCycle = 2;
+      break;
+    case '6':
+      iDelay -= 50;
+      iDisplayCycle = 2;
+      break;
+    case 'B':
+      doPulse(0);
+      break;
+    }
+  }
+
   switch (c)
   {
-  case '1':
-    iDeflection++;
-    displayCycle = 0;
-    break;
-  case '4':
-    iDeflection--;
-    displayCycle = 0;
-    break;
-  case '2':
-    iSpeed++;
-    displayCycle = 1;
-    break;
-  case '5':
-    iSpeed--;
-    displayCycle = 1;
-    break;
-  case '3':
-    iDelay += 10;
-    displayCycle = 2;
-    break;
-  case '6':
-    iDelay -= 10;
-    displayCycle = 3;
+  case 'A':
+    if (bRunning)
+    {
+      bRunning = false;
+      if (timerClickTask != 0)
+      {
+        timer.cancel(timerClickTask);
+        timerClickTask = 0;
+      }
+    }
+    else
+    {
+      bRunning = true;
+      timerClickTask = timer.every(iDelay + iHoldDelay, doPulse);
+    }
     break;
   }
 
   // Make sure the values we've set are within sane limtes.
   iDeflection = constrain(iDeflection, 0, 180);
-  iSpeed = constrain(iSpeed, 1, 1000);
-  iDelay = constrain(iDelay, 10, 10000);
+  iHoldDelay = constrain(iHoldDelay, 200, 10000);
+  iDelay = constrain(iDelay, iHoldDelay, 10000);
 
   // Update the LCD now. This is cheesed a bit by setting the displaycycle in the switch statement above. Sometimes this is a bit weird if the timer event triggers immediately after pressing a number on the keypad.
-  printLCDSettings(0);
+  if (!bRunning)
+  {
+    timer.cancel(lcdTimerTask);
+    printLCDSettings(0);
+    lcdTimerTask = timer.every(LCD_TIMER, printLCDSettings);
+  }
 }
 
 void loop()
@@ -264,16 +305,16 @@ void loop()
       break;
 
     case 'f':
-      iSpeed++;
+      iHoldDelay++;
       break;
 
     case 'v':
-      iSpeed--;
+      iHoldDelay--;
       break;
     }
     iDeflection = constrain(iDeflection, 0, 180);
     iDelay = constrain(iDelay, 10, 1000);
-    iSpeed = constrain(iSpeed, 0, 100);
+    iHoldDelay = constrain(iHoldDelay, 0, 100);
 
     printSetting();
 
